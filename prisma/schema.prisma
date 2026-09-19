@@ -1,0 +1,566 @@
+// ---------------------------------------------------------------------------
+// BackTrack — Prisma schema
+//
+// Content hierarchy:
+//   Board (SSC | HSC)
+//     -> Class   (SSC: 10;  HSC: 11, 12)
+//     -> Stream  (HSC only: Science | Commerce | Arts)  -- OPTIONAL
+//         -> Subject   (belongs to a Class, optionally narrowed by a Stream)
+//             -> Chapter
+//                 -> Note
+//                 -> Quiz -> QuizQuestion
+//             -> Pyq
+//
+// Student activity: NoteProgress, Bookmark, QuizAttempt
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Access level for a user. Modelled as an enum rather than a table because the
+/// role set is small, fixed, and checked on every request — an enum keeps the
+/// authorisation check a single column read with no join.
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+/// Editorial workflow state. Students only ever see PUBLISHED content.
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ProgressStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+/// Storage bucket a file belongs to. Mirrors the uploads/pdfs and
+/// uploads/images directories used by the local storage provider.
+enum FileKind {
+  PDF
+  IMAGE
+}
+
+// ---------------------------------------------------------------------------
+// Users & authentication
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  /// Null for OAuth-only accounts (Google). Never stores plaintext.
+  passwordHash  String?
+  image         String?
+  role          Role      @default(STUDENT)
+  emailVerified DateTime?
+  isActive      Boolean   @default(true)
+
+  // --- Study profile: what this student is currently studying -------------
+  boardId  String?
+  board    Board?  @relation(fields: [boardId], references: [id], onDelete: SetNull)
+  classId  String?
+  class    Class?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+  streamId String?
+  stream   Stream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+
+  // --- Streak tracking ----------------------------------------------------
+  currentStreak Int       @default(0)
+  longestStreak Int       @default(0)
+  lastActiveOn  DateTime?
+
+  // --- Relations ----------------------------------------------------------
+  accounts     Account[]
+  sessions     Session[]
+  noteProgress NoteProgress[]
+  quizAttempts QuizAttempt[]
+  bookmarks    Bookmark[]
+  uploads      FileAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+  @@index([boardId, classId])
+  @@map("users")
+}
+
+/// Auth.js — OAuth provider links.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+/// Auth.js — retained for adapter compatibility. The app uses the JWT session
+/// strategy (required by the Credentials provider), so rows here are only
+/// written for database-session flows.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// Auth.js — email verification / magic-link tokens.
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Academic structure
+// ---------------------------------------------------------------------------
+
+/// Top-level examination board: SSC (Class 10) or HSC (Class 11-12).
+model Board {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  slug         String  @unique
+  description  String?
+  /// Emoji used by the UI, carried over from the original prototype's cards.
+  icon         String?
+  displayOrder Int     @default(0)
+  /// Deactivated boards stay in the database but disappear from the student app.
+  isActive     Boolean @default(true)
+
+  classes Class[]
+  streams Stream[]
+  users   User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([displayOrder])
+  @@map("boards")
+}
+
+/// A year of schooling within a board (SSC -> 10, HSC -> 11 and 12).
+model Class {
+  id       String  @id @default(cuid())
+  /// Numeric year: 10, 11 or 12.
+  level    Int
+  name     String
+  slug     String
+  isActive Boolean @default(true)
+
+  boardId String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  subjects Subject[]
+  users    User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([boardId, level])
+  @@unique([boardId, slug])
+  @@index([boardId])
+  @@map("classes")
+}
+
+/// Specialisation offered by a board.
+///
+/// OPTIONAL BY DESIGN: SSC has no streams, so SSC subjects carry a null
+/// `streamId`. Only HSC defines Science / Commerce / Arts. A stream hangs off
+/// the Board (not the Class) so a single "Science" row serves Class 11 and 12.
+model Stream {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String
+  description String?
+  icon        String?
+  isActive    Boolean @default(true)
+
+  boardId String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  subjects Subject[]
+  users    User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([boardId, slug])
+  @@index([boardId])
+  @@map("streams")
+}
+
+/// A subject taught in a given class, optionally scoped to a stream.
+model Subject {
+  id           String  @id @default(cuid())
+  name         String
+  slug         String
+  /// Short human code such as "MATH10" or "PHY12". Optional; unique when set
+  /// (enforced by a partial index, since Postgres treats NULLs as distinct).
+  code         String?
+  description  String?
+  icon         String?
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  /// Null for SSC (and for HSC subjects common to every stream, e.g. English).
+  streamId String?
+  stream   Stream? @relation(fields: [streamId], references: [id], onDelete: SetNull)
+
+  chapters Chapter[]
+  pyqs     Pyq[]
+  quizzes  Quiz[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // NOTE: Postgres treats NULLs as distinct, so this constraint does not stop
+  // duplicate stream-less subjects on its own. The migration adds a partial
+  // unique index covering the `streamId IS NULL` case.
+  @@unique([classId, streamId, slug])
+  @@index([classId])
+  @@index([streamId])
+  @@index([code])
+  @@map("subjects")
+}
+
+/// An ordered chapter within a subject.
+model Chapter {
+  id           String  @id @default(cuid())
+  /// Display order, e.g. "Chapter 3".
+  number       Int
+  title        String
+  slug         String
+  description  String?
+  /// Ordering within the subject, independent of the printed chapter number.
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  notes   Note[]
+  quizzes Quiz[]
+  pyqs    Pyq[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([subjectId, slug])
+  @@unique([subjectId, number])
+  @@index([subjectId, number])
+  @@index([subjectId, displayOrder])
+  @@map("chapters")
+}
+
+// ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+/// An uploaded file.
+///
+/// Only metadata lives here — the bytes are held by whichever StorageProvider
+/// is configured (local disk today, S3/R2 later). `storageKey` is the
+/// provider-relative path, so swapping providers does not require a migration.
+/// Files are served through /api/files/[id] rather than a public directory, so
+/// access stays under application control regardless of provider.
+model FileAsset {
+  id           String   @id @default(cuid())
+  kind         FileKind
+  /// Provider-relative key, e.g. "pdfs/2026/abc123.pdf".
+  storageKey   String   @unique
+  /// Name the admin's browser supplied, preserved for downloads.
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  // Back-references so an orphaned file can be found and cleaned up.
+  noteAsPdf       Note[]      @relation("NotePdf")
+  noteAsThumbnail Note[]      @relation("NoteThumbnail")
+  noteImages      NoteImage[]
+  pyqAsQuestion   Pyq[]       @relation("PyqQuestion")
+  pyqAsSolution   Pyq[]       @relation("PyqSolution")
+
+  createdAt DateTime @default(now())
+
+  @@index([kind])
+  @@index([uploadedById])
+  @@map("file_assets")
+}
+
+/// Images embedded in a note, ordered for display.
+model NoteImage {
+  id           String  @id @default(cuid())
+  displayOrder Int     @default(0)
+  caption      String?
+
+  noteId String
+  note   Note      @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  fileId String
+  file   FileAsset @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([noteId, fileId])
+  @@index([noteId, displayOrder])
+  @@map("note_images")
+}
+
+// ---------------------------------------------------------------------------
+// Content
+// ---------------------------------------------------------------------------
+
+/// Study notes for a chapter: rich-text body and/or an uploaded PDF.
+model Note {
+  id      String  @id @default(cuid())
+  title   String
+  slug    String
+  summary String?
+  /// Markdown / rich text body.
+  content String?
+
+  /// Optional attached PDF.
+  pdfFileId String?
+  pdfFile   FileAsset? @relation("NotePdf", fields: [pdfFileId], references: [id], onDelete: SetNull)
+
+  /// Optional cover image shown in listings.
+  thumbnailFileId String?
+  thumbnailFile   FileAsset?    @relation("NoteThumbnail", fields: [thumbnailFileId], references: [id], onDelete: SetNull)
+  /// Reserved for a future premium tier; unused in the current phase.
+  isPremium       Boolean       @default(false)
+  status          ContentStatus @default(DRAFT)
+  viewCount       Int           @default(0)
+
+  chapterId String
+  chapter   Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  progress  NoteProgress[]
+  bookmarks Bookmark[]
+  images    NoteImage[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  @@unique([chapterId, slug])
+  @@index([chapterId])
+  @@index([status])
+  @@index([pdfFileId])
+  @@index([thumbnailFileId])
+  @@map("notes")
+}
+
+/// A previous year question paper, filed against a subject and year.
+model Pyq {
+  id            String        @id @default(cuid())
+  title         String
+  year          Int
+  /// e.g. "March 2024 Board Examination".
+  examSession   String?
+  description   String?
+  status        ContentStatus @default(DRAFT)
+  downloadCount Int           @default(0)
+
+  /// The question paper itself.
+  questionFileId String?
+  questionFile   FileAsset? @relation("PyqQuestion", fields: [questionFileId], references: [id], onDelete: SetNull)
+
+  /// Optional solution paper.
+  solutionFileId String?
+  solutionFile   FileAsset? @relation("PyqSolution", fields: [solutionFileId], references: [id], onDelete: SetNull)
+
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  /// Optional: some papers map to a single chapter or topic.
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+
+  bookmarks Bookmark[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  @@index([subjectId, year])
+  @@index([status])
+  @@index([chapterId])
+  @@map("pyqs")
+}
+
+// ---------------------------------------------------------------------------
+// Quiz engine
+// ---------------------------------------------------------------------------
+
+model Quiz {
+  id           String        @id @default(cuid())
+  title        String
+  slug         String
+  description  String?
+  /// Time limit in minutes.
+  durationMin  Int           @default(10)
+  passingScore Int           @default(40)
+  status       ContentStatus @default(DRAFT)
+
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  /// Null means the quiz spans the whole subject rather than one chapter.
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  @@unique([subjectId, slug])
+  @@index([subjectId])
+  @@index([chapterId])
+  @@index([status])
+  @@map("quizzes")
+}
+
+/// A single multiple-choice question.
+///
+/// `options` is a Postgres text[] and `correctIndex` points into it. A separate
+/// option table would add a join to every question read for no practical gain,
+/// since options are always fetched as a complete set.
+model QuizQuestion {
+  id           String     @id @default(cuid())
+  text         String
+  options      String[]
+  correctIndex Int
+  explanation  String?
+  difficulty   Difficulty @default(MEDIUM)
+  marks        Int        @default(1)
+  displayOrder Int        @default(0)
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([quizId, displayOrder])
+  @@map("quiz_questions")
+}
+
+/// One student's run at a quiz.
+///
+/// `answers` is JSON ({ questionId: selectedIndex }) because it is always read
+/// back as a whole and never queried field-by-field.
+model QuizAttempt {
+  id             String    @id @default(cuid())
+  score          Int       @default(0)
+  totalQuestions Int
+  answers        Json      @default("{}")
+  timeTakenSec   Int?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completedAt])
+  @@index([quizId])
+  @@map("quiz_attempts")
+}
+
+// ---------------------------------------------------------------------------
+// Student activity
+// ---------------------------------------------------------------------------
+
+/// Tracks which notes a student has opened or finished. This is what makes the
+/// dashboard's "Notes Completed" figure real instead of hardcoded.
+model NoteProgress {
+  id          String         @id @default(cuid())
+  status      ProgressStatus @default(IN_PROGRESS)
+  lastReadAt  DateTime       @default(now())
+  completedAt DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  noteId String
+  note   Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, noteId])
+  @@index([userId, status])
+  @@index([noteId])
+  @@map("note_progress")
+}
+
+/// A saved note or PYQ. Exactly one of `noteId` / `pyqId` is set; the migration
+/// adds a CHECK constraint enforcing that, plus partial unique indexes so a
+/// student cannot bookmark the same item twice.
+model Bookmark {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  noteId String?
+  note   Note?   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  pyqId String?
+  pyq   Pyq?    @relation(fields: [pyqId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([noteId])
+  @@index([pyqId])
+  @@map("bookmarks")
+}

@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * BackTrack theme.
+ *
+ * The original prototype was a dark, glassmorphic UI: a navy-to-blue gradient
+ * background, translucent white cards with a backdrop blur, and gold accents.
+ * Those values are preserved here as shadcn/ui CSS variables so every generated
+ * component inherits the brand automatically.
+ */
+@layer base {
+  :root {
+    /* Navy #0f172a */
+    --background: 222 47% 11%;
+    --foreground: 0 0% 100%;
+
+    /* Slightly lifted navy for solid surfaces */
+    --card: 222 40% 16%;
+    --card-foreground: 0 0% 100%;
+    --popover: 222 45% 13%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Gold #ffd700 — buttons, links, progress fill */
+    --primary: 51 100% 50%;
+    --primary-foreground: 222 47% 11%;
+
+    /* Blue #2563eb */
+    --secondary: 221 83% 53%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 222 30% 24%;
+    --muted-foreground: 215 20% 75%;
+
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Error #ff6b6b */
+    --destructive: 0 100% 71%;
+    --destructive-foreground: 222 47% 11%;
+
+    --border: 217 33% 28%;
+    --input: 217 33% 28%;
+    --ring: 51 100% 50%;
+
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    /* The 135deg navy -> blue gradient from the prototype */
+    @apply bg-brand-gradient text-foreground font-sans antialiased;
+    background-attachment: fixed;
+    min-height: 100vh;
+    /* Slightly tighter tracking reads better on a dark background. */
+    letter-spacing: -0.005em;
+  }
+
+  /* Headings share one scale so hierarchy is consistent across every page. */
+  h1 { @apply text-balance; }
+  h2, h3 { @apply text-balance; }
+
+  /* Long note bodies and descriptions wrap without orphans. */
+  p { @apply text-pretty; }
+
+  /* Gold focus ring, consistent with the brand accent */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-brand-navy;
+  }
+}
+
+@layer components {
+  /**
+   * Glassmorphic surface — the prototype's
+   * `background: rgba(255,255,255,.1); backdrop-filter: blur(10px)`.
+   */
+  .glass {
+    @apply border border-white/10 bg-white/10 backdrop-blur-md;
+  }
+
+  .glass-strong {
+    @apply border border-white/15 bg-white/[0.15] backdrop-blur-md;
+  }
+
+  /*
+   * The prototype lifted cards 15px with a white glow on a 0.5s transition.
+   * That reads as jumpy in a grid, so the lift is smaller, the glow softer and
+   * the timing quick enough to feel responsive rather than animated.
+   */
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:shadow-glow-gold;
+  }
+
+  /* Gold gradient text used for the wordmark */
+  .text-brand-gold {
+    color: #ffd700;
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

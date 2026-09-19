@@ -1,0 +1,459 @@
+================================================================================
+BACKTRACK - A CENTRALIZED ACADEMIC STUDY PLATFORM
+Project Explanation Document
+================================================================================
+
+--------------------------------------------------------------------------------
+1. WHAT IS THIS PROJECT (ONE LINE)
+--------------------------------------------------------------------------------
+
+BackTrack is a centralized study platform for SSC (Class 10) and HSC (Class 11-12)
+students of the Maharashtra State Board. It organizes study notes, previous year
+question papers and quizzes along the real academic hierarchy, tracks each
+student's actual progress, and gives teachers a full admin panel to manage all
+content without touching any code.
+
+Tagline: "Learn Smart, Score Better"
+
+
+--------------------------------------------------------------------------------
+2. THE PROBLEM WE ARE SOLVING
+--------------------------------------------------------------------------------
+
+A student preparing for board exams needs four things:
+  1. Chapter-wise notes
+  2. Previous year question papers (PYQs)
+  3. Practice quizzes
+  4. A clear sense of whether they are actually on track
+ry
+Today these live in four different places. Notes arrive in a WhatsApp group.
+PYQs come from a random website. Revision happens on YouTube. And progress is
+tracked nowhere at all.
+
+The result is three concrete problems:
+
+  PROBLEM 1 - SCATTERED MATERIAL
+  Study material is spread across chat groups, websites and personal drives.
+  Nothing is organized by syllabus. Nothing is searchable. A student cannot
+  reliably find "Class 10 Maths, Chapter 2 notes" in under five minutes.
+
+  PROBLEM 2 - NO MEASUREMENT
+  A student cannot answer the simple question: "Which chapters have I actually
+  finished?" Progress is a feeling, not a fact. There is no record of what was
+  read, what was completed, or how quiz scores are trending.
+
+  PROBLEM 3 - TEACHERS CANNOT PUBLISH
+  Most student projects hardcode their content. If a teacher wants to add a new
+  chapter or upload a paper, a developer has to change the code and redeploy.
+  That makes the system useless in practice.
+
+BackTrack solves all three:
+
+  SOLUTION 1 - One platform, organized along the real syllabus:
+              Board -> Class -> Stream -> Subject -> Chapter -> Study Material
+
+  SOLUTION 2 - Every action is recorded. Notes opened, notes completed, quiz
+              scores, average score, best score and a daily study streak are all
+              computed from the database. Nothing on screen is a fixed number.
+
+  SOLUTION 3 - A complete admin panel. A teacher logs in through a browser,
+              builds the syllabus, uploads PDFs and images, writes quizzes, and
+              clicks Publish. Students see it immediately. No code, no deploy.
+
+
+--------------------------------------------------------------------------------
+3. FEATURES
+--------------------------------------------------------------------------------
+
+STUDENT SIDE
+  - Sign up, log in, log out, with sessions that survive a browser restart
+  - Browse Board -> Class -> Stream -> Subject -> Chapter -> Study Material
+  - Read text notes, view PDFs inside the browser, view image material
+  - Download question papers and solutions
+  - Bookmark notes and papers, with a dedicated bookmarks page
+  - Mark material as completed; the system records last-viewed time
+  - Take timed quizzes: navigate between questions, change answers, submit
+  - See results: score, percentage, correct/incorrect marking, explanations
+  - Progress dashboard: notes completed, notes viewed, quizzes attempted,
+    average score, best score, current streak, subject-wise breakdown
+  - Global search across notes, chapters, subjects, PYQs and quizzes
+  - Profile editing with profile picture upload
+
+ADMIN SIDE
+  - Dashboard with live counts and recently added content
+  - Full create/edit/delete for Boards, Classes, Streams, Subjects, Chapters
+  - Study material: text content, PDF upload, thumbnail, multiple images
+  - PYQ management: question paper PDF plus optional solution PDF
+  - Quiz builder: questions, four options, correct answer, explanation, marks
+  - Publish / unpublish content; activate / deactivate hierarchy items
+  - Search, filters, sorting and pagination on every list screen
+  - Confirmation dialogs before every delete, stating what else will be removed
+  - User list showing role, board, class and stream
+
+
+--------------------------------------------------------------------------------
+4. TECHNOLOGY STACK (AND WHY EACH ONE)
+--------------------------------------------------------------------------------
+
+Never answer "because it is popular". Every choice below has a real reason.
+
+  NEXT.JS 15 (App Router)          - Framework
+    Server Components query PostgreSQL directly, so there is no separate REST
+    API to build, deploy and keep in sync. Server Actions handle writes the same
+    way. One codebase, one deployment.
+
+  TYPESCRIPT (strict mode)          - Language
+    Catches mistakes at compile time instead of runtime. The database schema
+    generates types automatically, so renaming a column becomes a build error
+    rather than a bug discovered by a user.
+
+  POSTGRESQL 16                     - Database
+    The data is a strict hierarchy with foreign keys and aggregate reporting
+    such as "average score per subject". Relational integrity matters more here
+    than schema flexibility. This is exactly why we did NOT use MongoDB.
+
+  PRISMA 6                          - ORM
+    Type-safe database queries and versioned migrations, so the schema has a
+    full history. The schema file also serves as ER documentation.
+
+  AUTH.JS v5 (NextAuth)             - Authentication
+    Sessions, password hashing and OAuth are easy to get subtly wrong.
+    Passwords are hashed with bcrypt at cost factor 12.
+
+  TAILWIND CSS + SHADCN/UI          - Styling and components
+    Utility-first CSS. The UI components live inside the repository, so they can
+    be read and edited. They are not a black-box third-party library.
+
+  ZOD + REACT HOOK FORM             - Validation
+    One schema validates in the browser AND again on the server. The client
+    check is for user experience; the server check is the actual security.
+
+  DOCKER COMPOSE                    - Local infrastructure
+    One command gives an identical PostgreSQL database on any machine. This
+    removes the "it works on my computer" problem entirely.
+
+  NODE:TEST + TSX                   - Testing
+    Built into Node.js. No extra test framework to install or configure.
+
+
+--------------------------------------------------------------------------------
+5. SYSTEM ARCHITECTURE
+--------------------------------------------------------------------------------
+
+  Browser
+     |
+     |-- middleware.ts .......... redirects unauthenticated users (UX layer only)
+     |
+     |-- app/(auth)/* ........... login, signup
+     |-- app/page.tsx ........... public landing page
+     |-- app/dashboard/* ........ student area  (layout re-checks the session)
+     |-- app/admin/* ............ admin area   (layout re-checks session + role)
+     |-- app/api/* .............. auth handlers, file upload, file serving
+              |
+              |-- server/queries.ts ........... admin and public reads
+              |-- server/student-queries.ts ... student reads
+              |-- server/admin-queries.ts ..... admin list reads
+              |-- server/actions/** ........... all writes (Server Actions)
+                       |
+                       |-- lib/prisma.ts ...... single PrismaClient instance
+                                |
+                                |-- PostgreSQL (running in Docker)
+
+Key point: there is no separate backend server. Next.js Server Components read
+the database directly, and Server Actions write to it. This is a modern
+full-stack architecture, not a traditional frontend-plus-API split.
+
+
+--------------------------------------------------------------------------------
+6. DATABASE DESIGN
+--------------------------------------------------------------------------------
+
+  Board (SSC | HSC)
+    |-- Class    (SSC: 10 | HSC: 11, 12)
+    |-- Stream   (HSC only: Science | Commerce | Arts)   <-- OPTIONAL
+    |-- Subject  (belongs to a Class, optionally narrowed by a Stream)
+           |-- Chapter
+           |      |-- Note --- NoteImage --- FileAsset
+           |      |-- Quiz --- QuizQuestion
+           |-- Pyq --- FileAsset
+
+  User |-- NoteProgress --- Note
+       |-- QuizAttempt  --- Quiz
+       |-- Bookmark     --- Note or Pyq
+
+16 models in total, including the Auth.js session tables.
+
+WHY IS "STREAM" OPTIONAL?
+  SSC has no streams at all. HSC has Science, Commerce and Arts. But some HSC
+  subjects, such as English, belong to NO stream because every student takes
+  them. So streamId is nullable.
+
+  The important detail: the rule "a stream must belong to the selected board" is
+  enforced against the database. SSC simply has no stream rows to choose from,
+  so the SSC/HSC difference is handled by the DATA, not by an if-statement.
+  No board name is hardcoded anywhere in the application.
+
+SIX CONSTRAINTS THE DATABASE ENFORCES ITSELF
+  1. PostgreSQL treats NULL values as distinct from each other, so an ordinary
+     unique constraint would NOT prevent two stream-less subjects from sharing
+     the same slug. A PARTIAL UNIQUE INDEX solves this.
+  2. Subject codes are optional, but must be unique when they are present.
+  3. A bookmark must point at exactly one item:
+     CHECK num_nonnulls(noteId, pyqId) = 1
+  4. A quiz question's correct answer must be one of its four options.
+  5. An uploaded file's declared kind must match its actual MIME type.
+  6. File sizes must be greater than zero.
+
+CASCADE BEHAVIOUR
+  Deleting a Board / Class / Subject / Chapter -> cascades down to its content
+  Deleting a Stream  -> its subjects SURVIVE and simply become stream-less
+  Deleting a User    -> cascades to their progress, bookmarks and attempts
+  Deleting a File    -> the attachment becomes null; the content is kept
+
+
+--------------------------------------------------------------------------------
+7. SECURITY
+--------------------------------------------------------------------------------
+
+AUTHORIZATION IS CHECKED TWICE
+  1. middleware.ts redirects unauthenticated visitors. This is a CONVENIENCE
+     layer for user experience. It is NOT the security boundary.
+  2. Every protected layout and every Server Action independently re-reads the
+     session and re-checks the role against the database.
+
+  Why the second check matters: in Next.js, EVERY EXPORT OF A 'use server' FILE
+  IS A PUBLIC HTTP ENDPOINT. Someone can call it directly without ever loading
+  the page. So each action begins with requireUser() or requireAdmin().
+  This is covered by an automated test: calling an admin action with no session
+  writes ZERO rows to the database.
+
+PASSWORDS
+  Hashed with bcrypt at cost factor 12. Never stored in plain text, never
+  logged, never returned by any query.
+
+THE QUIZ ANSWER KEY NEVER REACHES THE BROWSER
+  During an attempt, the database query deliberately does not select the
+  correctIndex column. Grading happens on the server when the quiz is submitted.
+  A student can open browser developer tools and find nothing. This is verified
+  by an automated test.
+
+FILE UPLOAD SECURITY
+  Validation happens BEFORE anything is written to disk:
+    - Size limits (20 MB for PDFs, 5 MB for images, 2 MB for avatars)
+    - MIME type allow-list
+    - File extension allow-list
+    - Magic-byte check, so a renamed file cannot pretend to be a PDF
+
+  Uploaded files are stored OUTSIDE the public folder. They are served by an
+  authenticated route that only lets students read files attached to PUBLISHED
+  content. Draft material stays admin-only. If files were in the public folder,
+  anyone could read every upload just by guessing the URL.
+
+SECRETS
+  No secrets are hardcoded anywhere. The setup script generates a random
+  AUTH_SECRET and a random database password. The .env file is git-ignored;
+  only .env.example is committed.
+
+
+--------------------------------------------------------------------------------
+8. HOW PROGRESS TRACKING WORKS
+--------------------------------------------------------------------------------
+
+The original prototype displayed fixed numbers: "45 notes completed",
+"18/20 quiz score", "7 day streak". Those were hardcoded text. They never
+changed, no matter what the student did.
+
+In BackTrack every number is computed from that student's own database rows:
+
+  Notes completed  -> COUNT of NoteProgress rows with status = COMPLETED
+  Notes viewed     -> COUNT of NoteProgress rows
+  Average score    -> AVERAGE of (score / total) across completed QuizAttempts
+  Best score       -> MAXIMUM of the same
+  Study streak     -> calculated from the lastActiveOn date
+
+STREAK RULES
+  Same day again    -> no change (opening ten notes is still one day of study)
+  Next day          -> streak + 1
+  A day was missed  -> streak resets to 1
+  Never active      -> streak starts at 1
+  Clock moved back  -> no change (never punish a student for a bad clock)
+
+
+--------------------------------------------------------------------------------
+9. HOW TO RUN THE PROJECT
+--------------------------------------------------------------------------------
+
+REQUIREMENTS
+  - Node.js version 20 or newer
+  - Docker Desktop (which includes Docker Compose)
+
+FIRST TIME SETUP (one command)
+  ./setup.sh
+
+  This automatically:
+    1. Checks Node.js, npm, Docker and Docker Compose are installed
+    2. Creates the .env file with a randomly generated secret and password
+    3. Installs all npm dependencies
+    4. Starts PostgreSQL inside Docker and waits until it is ready
+    5. Generates the Prisma client and applies all database migrations
+    6. Loads the demo data
+    7. Creates the upload folders
+
+DAILY USE
+  ./start.sh              Start the app at http://localhost:3000
+  ./start.sh --prod       Build for production, then run it
+  ./stop.sh               Stop the app
+  ./stop.sh --all         Stop the app and the database
+  ./reset-db.sh           Wipe and reload the demo data (asks for confirmation)
+
+CHECKING EVERYTHING WORKS
+  npm run verify          Lint + type check + schema validation + tests + build
+  npm test                All 55 automated tests
+
+DEMO LOGIN DETAILS
+  Admin    admin@backtrack.local    /  Admin@12345
+  Student  student@backtrack.local  /  Student@12345
+
+IMPORTANT WARNING
+  Never run "npm run build" or "npm run verify" while the development server is
+  already running. The build overwrites the folder the running server is using,
+  which causes confusing errors. Stop the server first.
+
+
+--------------------------------------------------------------------------------
+10. HOW TO DEMONSTRATE THIS PROJECT (VIVA DEMO FLOW)
+--------------------------------------------------------------------------------
+
+Before you start, run ./reset-db.sh so the data is clean and predictable.
+
+PART 1 - ADMIN: CREATE THE CONTENT (about 5 minutes)
+
+  1. Log in as admin (admin@backtrack.local / Admin@12345)
+     Point out that the dashboard counts are live database queries.
+
+  2. Add a subject. Go to Admin -> Subjects -> New subject. Choose HSC, Class 12.
+     SAY THIS: "Choosing a class filters the stream list to that board. SSC
+     offers no streams at all, because that rule comes from the data, not from
+     a hardcoded board name."
+
+  3. Add a chapter under that subject.
+
+  4. Upload study material. Choose the chapter, type some text, upload a PDF,
+     set the status to Published.
+     SAY THIS: "The file is checked for size, MIME type and magic bytes before
+     it ever touches the disk, and it is stored outside the public folder."
+
+  5. Create a PYQ. Upload a question paper PDF and publish it.
+
+  6. Create a quiz. Try to publish it with no questions - IT IS REFUSED.
+     Then add a question with four options, mark the correct one, add an
+     explanation, and publish.
+
+  7. Log out.
+
+PART 2 - STUDENT: USE THE CONTENT (about 5 minutes)
+
+  8. Log in as the student (student@backtrack.local / Student@12345)
+
+  9. Browse: Notes -> board -> class -> stream -> subject -> chapter
+     SAY THIS: "Nothing in this navigation path is hardcoded. Every level is a
+     database query."
+
+ 10. Open the material. Read the text, view the PDF inside the page, click
+     Download. Bookmark it. Mark it as completed.
+
+ 11. Take the quiz. Answer some correctly and one incorrectly. Use the question
+     navigator to jump between questions. Submit.
+     SAY THIS: "The correct answers are never sent to the browser during the
+     attempt. Grading happens on the server."
+
+ 12. View the result: score, percentage, correct and incorrect marking, and the
+     explanation for each question.
+
+ 13. Show Progress. The notes-completed count and the quiz average have both
+     changed.
+     SAY THIS: "The original prototype hardcoded 45 notes, 18 out of 20, and a
+     7 day streak. Every number here is calculated from this student's own rows."
+
+ 14. Show Profile and Bookmarks. The bookmark from step 10 is there. Upload a
+     profile picture.
+
+
+--------------------------------------------------------------------------------
+11. LIKELY VIVA QUESTIONS AND ANSWERS
+--------------------------------------------------------------------------------
+
+Q: Why Next.js instead of plain React?
+A: Server Components query PostgreSQL directly and Server Actions handle writes,
+   so there is no separate API server to build, deploy and keep in sync. It also
+   renders on the server, which is better for performance and for search engines.
+
+Q: Why PostgreSQL instead of MongoDB?
+A: The content is a strict hierarchy with foreign key relationships, and we run
+   aggregate reports such as average score per subject. Relational integrity is
+   more important here than flexible schemas. In MongoDB we would have to
+   enforce that consistency manually in application code.
+
+Q: How is the admin area secured?
+A: Two independent checks. Middleware redirects for user experience, and every
+   layout and Server Action re-checks the session and role against the database.
+
+Q: Could a student call an admin function directly, bypassing the UI?
+A: No, and this is tested. In Next.js every export of a 'use server' file is a
+   public HTTP endpoint, so each one begins with requireAdmin(). Calling one
+   without an admin session writes zero rows.
+
+Q: How is the quiz scored?
+A: Entirely on the server. The browser never receives the correct answers during
+   an attempt. The scoring function also discards any question ID that does not
+   belong to that quiz, so a crafted request cannot add marks.
+
+Q: How does the study streak work?
+A: It compares the last active date with today. The same day makes no change,
+   a consecutive day increments the streak, and a gap resets it to 1.
+
+Q: What happens if you delete a stream? Do the subjects disappear?
+A: No. Subjects reference streams with ON DELETE SET NULL, so they survive and
+   become stream-less. Deleting a board or class does cascade, and the
+   confirmation dialog states exactly how many items will be removed.
+
+Q: How would you scale this or move it to the cloud?
+A: File storage is behind a StorageProvider interface. Moving from local disk to
+   Amazon S3 or Cloudflare R2 means writing one new class and changing one line
+   in a factory function. No routes, no actions and no migrations change.
+
+Q: How do you know it works?
+A: There are 55 automated tests. Unit tests cover quiz scoring, streak
+   calculation and all validation rules. Integration tests cover the database
+   constraints, cascade behaviour and content visibility rules.
+
+
+--------------------------------------------------------------------------------
+12. KNOWN LIMITATIONS (BE HONEST ABOUT THESE)
+--------------------------------------------------------------------------------
+
+  1. In the logged-in areas, a "not found" page returns HTTP status 200 instead
+     of 404. This is a Next.js streaming behaviour when a layout reads cookies,
+     not a bug in our code. The correct page is shown and no data leaks.
+  2. The admin user list is read-only. Changing roles and deactivating accounts
+     is not built yet.
+  3. Quiz questions are added one at a time. A CSV bulk import would be the
+     obvious next step for building a large question bank.
+  4. Google sign-in is wired up but disabled unless credentials are provided.
+  5. There is no email sending, so password reset is not available.
+
+
+--------------------------------------------------------------------------------
+13. PROJECT STATISTICS
+--------------------------------------------------------------------------------
+
+  Database models ............ 16
+  Application routes ......... 36
+  Automated tests ............ 55 (all passing)
+  Demo data .................. 2 boards, 3 classes, 3 streams, 8 subjects,
+                               17 chapters, 17 notes, 16 PYQs, 3 quizzes
+  Setup ...................... 1 command (./setup.sh)
+
+================================================================================
+END OF DOCUMENT
+================================================================================

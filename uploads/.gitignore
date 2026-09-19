@@ -1,0 +1,9 @@
+# Uploaded files are runtime data, not source.
+*
+!.gitignore
+!pdfs/
+!images/
+pdfs/*
+images/*
+!pdfs/.gitkeep
+!images/.gitkeep
